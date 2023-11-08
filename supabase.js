@@ -1,0 +1,2 @@
+const { createClient } = require('@supabase/supabase-js');
+export default supabase = createClient("https://bbkcgfuyjtmqqrlhqzvo.supabase.co", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJia2NnZnV5anRtcXFybGhxenZvIiwicm9sZSI6ImFub24iLCJpYXQiOjE2OTkzMTczNDgsImV4cCI6MjAxNDg5MzM0OH0.K0_Ti1VB5m6KECVauAmQpc6Wg1XflCJPIxN7YnROWGo")
