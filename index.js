@@ -1,9 +1,9 @@
+require('dotenv').config();
 const puppeteer = require('puppeteer');
 
+
 const { createClient } = require('@supabase/supabase-js');
-const SUPABASE_URL = 'https://bbkcgfuyjtmqqrlhqzvo.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJia2NnZnV5anRtcXFybGhxenZvIiwicm9sZSI6ImFub24iLCJpYXQiOjE2OTkzMTczNDgsImV4cCI6MjAxNDg5MzM0OH0.K0_Ti1VB5m6KECVauAmQpc6Wg1XflCJPIxN7YnROWGo';
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
 // const north_boundary = -8.3975;
 // const south_boundary = -8.7237;
@@ -54,6 +54,8 @@ function delay(ms) {
         return response.json();
       }, lat, lon);
 
+      console.log(data);
+      
       if (data.status === 200 || data.status === 404) {
         if (data.status === 200) {
           return data.data
@@ -107,6 +109,7 @@ function delay(ms) {
     }
   }
 
+  // Find Gap
   const {data, error} = await supabase.rpc("find_gaps_geometry_test", {
     west_boundary,
     south_boundary,
@@ -120,12 +123,14 @@ function delay(ms) {
   
   for (let i = 0; i < outerPolygon.length; i++) {
     const coordinate = outerPolygon[i]; // [longitude, latitude]
-    const plotData = await getPlotData(coordinate[1], coordinate[0])
-    if (plotData) {
-      console.log(plotData);
-      await insertPlotData(plotData)
-      delay(1000)
+    for (coor of coordinate) {
+        const plotData = await getPlotData(coor[1], coor[0])
+        if (plotData) {
+          await insertPlotData(plotData)
+          delay(1000)
+        }
     }
   }
+  
   await browser.close();
 })();
