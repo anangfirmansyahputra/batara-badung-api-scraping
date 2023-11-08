@@ -1,8 +1,10 @@
 {
   "dependencies": {
     "@supabase/supabase-js": "^2.38.4",
+    "@turf/turf": "^6.5.0",
     "axios": "^1.6.0",
-    "puppeteer": "^21.4.1"
+    "puppeteer": "^21.4.1",
+    "wkx": "^0.5.0"
   },
   "name": "scrapping",
   "version": "1.0.0",

@@ -1,15 +1,21 @@
 const puppeteer = require('puppeteer');
+
 const { createClient } = require('@supabase/supabase-js');
 const SUPABASE_URL = 'https://bbkcgfuyjtmqqrlhqzvo.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJia2NnZnV5anRtcXFybGhxenZvIiwicm9sZSI6ImFub24iLCJpYXQiOjE2OTkzMTczNDgsImV4cCI6MjAxNDg5MzM0OH0.K0_Ti1VB5m6KECVauAmQpc6Wg1XflCJPIxN7YnROWGo';
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-const north_boundary = -8.3975;
-const south_boundary = -8.7237;
-const east_boundary = 115.3017;
-const west_boundary = 115.1246;
+// const north_boundary = -8.3975;
+// const south_boundary = -8.7237;
+// const east_boundary = 115.3017;
+// const west_boundary = 115.1246;
 
-// Grid step size for latitude and longitude
+// Pererenan
+const west_boundary = 115.1176;
+const south_boundary = -8.6383;
+const east_boundary = 115.1405;
+const north_boundary = -8.6217;
+
 const initial_lat_step = 0.005;
 const initial_lon_step = 0.005;
 
@@ -83,16 +89,13 @@ function delay(ms) {
         geometry: convertToMultipolygon(geometry.coordinates)
       }
 
-      console.log(dataInsert);
-
-      const { data, error } = await supabase.from('plots').insert([dataInsert])
+      const { data, error } = await supabase.from('test').insert([dataInsert])
 
       if (error) {
         console.log(error);
       }
     }
   }
-
 
   for (let lat = south_boundary; lat < north_boundary; lat += initial_lat_step) {
     for (let lon = west_boundary; lon < east_boundary; lon += initial_lon_step) {
@@ -104,5 +107,25 @@ function delay(ms) {
     }
   }
 
+  const {data, error} = await supabase.rpc("find_gaps_geometry_test", {
+    west_boundary,
+    south_boundary,
+    east_boundary,
+    north_boundary
+  })
+
+  const geoJson = data
+
+  const outerPolygon = geoJson.coordinates[0];
+  
+  for (let i = 0; i < outerPolygon.length; i++) {
+    const coordinate = outerPolygon[i]; // [longitude, latitude]
+    const plotData = await getPlotData(coordinate[1], coordinate[0])
+    if (plotData) {
+      console.log(plotData);
+      await insertPlotData(plotData)
+      delay(1000)
+    }
+  }
   await browser.close();
 })();
