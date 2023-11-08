@@ -110,6 +110,31 @@ function delay(ms) {
   }
 
   // Find Gap
+  // for find_gaps_geometry_test, i create with sql editor on supabase
+  //   -- Fungsi untuk menghitung geometri celah berdasarkan bounding box dan union dari plot
+  // create or replace function find_gaps_geometry_test(
+  //   in west_boundary double precision,
+  //   in south_boundary double precision,
+  //   in east_boundary double precision,
+  //   in north_boundary double precision
+  // )
+  // returns jsonb as $$
+  // declare
+  //   geom_gaps jsonb;
+  //   bali_bbox geometry;
+  // begin
+  //   -- Buat bounding box berdasarkan parameter
+  //   bali_bbox := ST_MakeEnvelope(west_boundary, south_boundary, east_boundary, north_boundary, 4326);
+
+  //   -- Hitung geometri celah dengan mengurangkan bounding box dari union dari plot
+  //   select ST_AsGeoJSON(ST_Difference(bali_bbox, ST_Union(geometry::geometry))) into geom_gaps from test;
+
+  //   return geom_gaps;
+  // end;
+  // $$
+  // language plpgsql;
+
+  // and data will return polygon, and right now i still not find the way how to handle gap
   const {data, error} = await supabase.rpc("find_gaps_geometry_test", {
     west_boundary,
     south_boundary,
@@ -117,6 +142,7 @@ function delay(ms) {
     north_boundary
   })
 
+  
   const geoJson = data
 
   const outerPolygon = geoJson.coordinates[0];
@@ -131,6 +157,6 @@ function delay(ms) {
         }
     }
   }
-  
+
   await browser.close();
 })();
