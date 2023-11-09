@@ -1,5 +1,7 @@
 require("dotenv").config();
 const puppeteer = require("puppeteer");
+const NodeCache = require("node-cache");
+const myCache = new NodeCache();
 
 const { createClient } = require("@supabase/supabase-js");
 const supabase = createClient(
@@ -27,7 +29,7 @@ const supabase = createClient(
     $$ LANGUAGE plpgsql;
 
   2. Create function again in supabase for get coordinates gap, this will return data of line coordinate
-  CREATE OR REPLACE FUNCTION find_gap_coordinates(
+  CREATE OR REPLACE FUNCTION find_gap_coordinates_plots(
   in west_boundary double precision,
   in south_boundary double precision,
   in east_boundary double precision,
@@ -81,31 +83,36 @@ function delay(ms) {
 }
 
 async function findGaps(step) {
-    let data = [];
-    let start = 0;
-    let size = 1000;
-    let hasMore = true;
-    let errorFindGap;
+  let data = [];
+  let start = 0;
+  let size = 1000;
+  let hasMore = true;
+  let errorFindGap;
 
-    while (hasMore) {
-      const { data:gaps, error, count } = await supabase.rpc("find_gap_coordinates", {
+  while (hasMore) {
+    const {
+      data: gaps,
+      error,
+      count,
+    } = await supabase
+      .rpc("find_gap_coordinates_plots", {
         west_boundary,
         south_boundary,
         east_boundary,
         north_boundary,
         step,
-      }).select('*', { count: 'exact' })
-      .range(start, start + size - 1);;
-      
-      if (error) throw error;
+      })
+      .select("*", { count: "exact" })
+      .range(start, start + size - 1);
 
-      data = [...data, ...gaps];
-      start += size;
-      hasMore = (count ?? 0) > start;
+    if (error) throw error;
 
-      errorFindGap = error
-    }
+    data = [...data, ...gaps];
+    start += size;
+    hasMore = (count ?? 0) > start;
 
+    errorFindGap = error;
+  }
 
   return { data, errorFindGap };
 }
@@ -116,6 +123,12 @@ async function findGaps(step) {
 
   async function getPlotData(lat, lon) {
     let retryCount = 1;
+    const cacheKey = `${lat},${lon}`;
+
+    const value = myCache.get(cacheKey);
+    if (value != undefined) {
+      return value;
+    }
 
     while (true) {
       const url = `https://batara.badungkab.go.id/search-detail?coordinate=${lat},${lon}`;
@@ -149,6 +162,8 @@ async function findGaps(step) {
 
       if (data.status === 200 || data.status === 404) {
         if (data.status === 200) {
+          // Simpan data ke cache sebelum mengembalikannya
+          myCache.set(cacheKey, data.data);
           return data.data;
         } else {
           return null;
@@ -194,28 +209,29 @@ async function findGaps(step) {
     }
   }
 
-  for (
-    let lat = south_boundary;
-    lat < north_boundary;
-    lat += initial_lat_step
-  ) {
-    for (
-      let lon = west_boundary;
-      lon < east_boundary;
-      lon += initial_lon_step
-    ) {
-      const plotData = await getPlotData(lat, lon);
-      if (plotData) {
-        await insertPlotData(plotData);
-        delay(1000);
-      }
-    }
-  }
+  // Comment this block code when you just want to find a gap
+  // for (
+  //   let lat = south_boundary;
+  //   lat < north_boundary;
+  //   lat += initial_lat_step
+  // ) {
+  //   for (
+  //     let lon = west_boundary;
+  //     lon < east_boundary;
+  //     lon += initial_lon_step
+  //   ) {
+  //     const plotData = await getPlotData(lat, lon);
+  //     if (plotData) {
+  //       await insertPlotData(plotData);
+  //       delay(1000);
+  //     }
+  //   }
+  // }
 
   // Find a gap
   async function findGapsAndRescan() {
-    console.log('[FINDING_GAP]');
-    
+    console.log("[FINDING_GAP]");
+
     const { data, errorFindGap } = await findGaps(0.0005);
 
     if (errorFindGap) {
@@ -229,6 +245,7 @@ async function findGaps(step) {
       }
     }
 
+    // Function to delete duplicate data
     const { data: duplicate, error: duplicateError } = await supabase.rpc(
       "delete_duplicates"
     );
