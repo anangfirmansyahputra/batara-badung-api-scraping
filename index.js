@@ -1,9 +1,8 @@
 require("dotenv").config();
 const puppeteer = require("puppeteer");
-const NodeCache = require("node-cache");
-const myCache = new NodeCache();
 
 const { createClient } = require("@supabase/supabase-js");
+const { redis } = require("./lib/redis");
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_ANON_KEY
@@ -82,6 +81,33 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function insertZoningArea(geom) {
+  const { data, error } = await supabase.rpc("is_geography_exists", {
+    input_type: "zone",
+    input_geometry: geom.zoning_geom,
+  });
+
+  if (error) {
+    console.log("[FIND_ZONING :]", error);
+    return null;
+  }
+
+  if (!data) {
+    const { data, error } = await supabase.from("zoning_areas").insert([geom]);
+
+    if (error) {
+      console.log("[INSERT_ZONING_AREA] :", error);
+      return null;
+    }
+    console.log("[INSERT_ZONING_AREA] : SUCCESS");
+  } else {
+    console.log("[ZONING_ALREDY_REGISTERED]");
+    return null;
+  }
+
+  // }
+}
+
 async function findGaps(step) {
   let data = [];
   let start = 0;
@@ -123,16 +149,17 @@ async function findGaps(step) {
 
   async function getPlotData(lat, lon) {
     let retryCount = 1;
-    const cacheKey = `${lat},${lon}`;
-
-    const value = myCache.get(cacheKey);
-    if (value != undefined) {
-      return value;
-    }
 
     while (true) {
+      const cachedValue = await redis.get(`${lat} ${lon}`);
+
+      if (cachedValue) {
+        console.log(`Get data from cache : ${lat} ${lon}`);
+        return JSON.parse(cachedValue);
+      }
+
       const url = `https://batara.badungkab.go.id/search-detail?coordinate=${lat},${lon}`;
-      console.log(`Fetching data from: ${url}`);
+      console.log(`Fetching data : ${lat} ${lon}`);
 
       await page.goto(url);
 
@@ -161,9 +188,9 @@ async function findGaps(step) {
       );
 
       if (data.status === 200 || data.status === 404) {
+        await redis.set(`${lat} ${lon}`, JSON.stringify(data.data));
+
         if (data.status === 200) {
-          // Simpan data ke cache sebelum mengembalikannya
-          myCache.set(cacheKey, data.data);
           return data.data;
         } else {
           return null;
@@ -177,56 +204,84 @@ async function findGaps(step) {
   }
 
   async function insertPlotData(plotGeoJSON) {
+    function convertToMultipolygon(coordinates) {
+      const formattedCoordinates = coordinates.map((polygon) => {
+        const ring = polygon[0]
+          .map((coord) => `${coord[0]} ${coord[1]}`)
+          .join(",");
+        return `((${ring}))`;
+      });
+
+      const multipolygon = `MULTIPOLYGON(${formattedCoordinates.join(",")})`;
+      return multipolygon;
+    }
+
     const certificate = JSON.parse(plotGeoJSON.certificate);
+
+    const { geojson, ...information } = plotGeoJSON.territorials.geom[0];
+
+    if (geojson !== null) {
+      await insertZoningArea({
+        zone_code: plotGeoJSON.territorials.geom[0].zone.parent.code,
+        name: plotGeoJSON.territorials.geom[0].zone.parent.name,
+        center: `POINT(${plotGeoJSON.center.lng} ${plotGeoJSON.center.lat})`,
+        zoning_geom: convertToMultipolygon(JSON.parse(geojson).coordinates),
+        information: JSON.stringify(information),
+      });
+    }
+
     if (certificate !== null) {
       const geometry = certificate.features[0].geometry;
 
-      function convertToMultipolygon(coordinates) {
-        const formattedCoordinates = coordinates.map((polygon) => {
-          const ring = polygon[0]
-            .map((coord) => `${coord[0]} ${coord[1]}`)
-            .join(",");
-          return `((${ring}))`;
-        });
-
-        const multipolygon = `MULTIPOLYGON(${formattedCoordinates.join(",")})`;
-        return multipolygon;
-      }
-
-      const dataInsert = {
-        // name: "Nama Plot",
-        center: `POINT(${plotGeoJSON.center.lng} ${plotGeoJSON.center.lat})`,
-        geometry: convertToMultipolygon(geometry.coordinates),
-      };
-
-      const { data, error } = await supabase.from("plots").insert([dataInsert]);
+      const { data, error } = await supabase.rpc("is_geography_exists", {
+        input_type: "plot",
+        input_geometry: convertToMultipolygon(geometry.coordinates),
+      });
 
       if (error) {
-        console.log(error);
+        console.log("[FIND_PLOT :]", error);
+        return null;
       }
 
-      console.log("[INSERT_DATA] : SUCCESS");
+      if (data) {
+        console.log("[PLOTS_ALREDY_REGISTERED]");
+      } else {
+        const dataInsert = {
+          // name: "Nama Plot",
+          zone_code: plotGeoJSON.territorials.geom[0].zone.parent.code,
+          center: `POINT(${plotGeoJSON.center.lng} ${plotGeoJSON.center.lat})`,
+          geometry: convertToMultipolygon(geometry.coordinates),
+        };
+
+        const { data, error } = await supabase
+          .from("plots")
+          .insert([dataInsert]);
+        if (error) {
+          console.log("[INSERT_PLOT_DATA] :", error);
+        }
+
+        console.log("[INSERT_PLOT_DATA] : SUCCESS");
+      }
     }
   }
 
   // Comment this block code when you just want to find a gap
-  // for (
-  //   let lat = south_boundary;
-  //   lat < north_boundary;
-  //   lat += initial_lat_step
-  // ) {
-  //   for (
-  //     let lon = west_boundary;
-  //     lon < east_boundary;
-  //     lon += initial_lon_step
-  //   ) {
-  //     const plotData = await getPlotData(lat, lon);
-  //     if (plotData) {
-  //       await insertPlotData(plotData);
-  //       delay(1000);
-  //     }
-  //   }
-  // }
+  for (
+    let lat = south_boundary;
+    lat < north_boundary;
+    lat += initial_lat_step
+  ) {
+    for (
+      let lon = west_boundary;
+      lon < east_boundary;
+      lon += initial_lon_step
+    ) {
+      const plotData = await getPlotData(lat, lon);
+      if (plotData) {
+        await insertPlotData(plotData);
+      }
+    }
+  }
 
   // Find a gap
   async function findGapsAndRescan() {
@@ -239,6 +294,19 @@ async function findGaps(step) {
     }
 
     for (line of data) {
+      const plotData = await getPlotData(line.y, line.x);
+      if (plotData) {
+        await insertPlotData(plotData);
+      }
+    }
+
+    const { data: gap2, errorFindGap: errorFindGap2 } = await findGaps(0.0003);
+
+    if (errorFindGap2) {
+      return console.log(errorFindGap2);
+    }
+
+    for (line of gap2) {
       const plotData = await getPlotData(line.y, line.x);
       if (plotData) {
         await insertPlotData(plotData);
